@@ -224,16 +224,20 @@ bash scripts/run_pipeline.sh --mode rulebased_baseline
 
 ## Citation
 
-If you find SWE-Mutation useful for your research, please cite:
+If you find SWE-Mutation useful for your research, please cite the arXiv version:
 
 ```bibtex
-@inproceedings{sun2026swemutation,
-  title     = {{SWE}-Mutation: Can {LLM}s Generate Reliable Test Suites in Software Engineering?},
-  author    = {Sun, Yuxuan and Zhao, Yuze and Wang, Yufeng and Du, Yao and
-               Ma, Zhiyuan and Wang, Jinbo and Zhang, Mengdi and
-               Zhang, Kai and Huang, Zhenya},
-  booktitle = {Findings of the Association for Computational Linguistics: ACL 2026},
-  year      = {2026}
+@misc{sun2026swemutation,
+  title         = {{SWE}-Mutation: Can {LLM}s Generate Reliable Test Suites in Software Engineering?},
+  author        = {Sun, Yuxuan and Zhao, Yuze and Wang, Yufeng and Du, Yao and
+                   Ma, Zhiyuan and Wang, Jinbo and Zhang, Mengdi and
+                   Zhang, Kai and Huang, Zhenya},
+  year          = {2026},
+  eprint        = {2605.22175},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SE},
+  url           = {https://arxiv.org/abs/2605.22175},
+  note          = {ACL 2026 Findings}
 }
 ```
 
