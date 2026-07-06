@@ -5,7 +5,7 @@
   <a href="#"><img alt="Benchmark" src="https://img.shields.io/badge/Benchmark-SWE--Mutation-blue"></a>
   <a href="#"><img alt="Languages" src="https://img.shields.io/badge/Languages-10-green"></a>
   <a href="#"><img alt="License" src="https://img.shields.io/badge/License-MIT-yellow"></a>
-  <a href="#"><img alt="Status" src="https://img.shields.io/badge/Code%20%26%20Data-Coming%20Soon-orange"></a>
+  <a href="#"><img alt="Status" src="https://img.shields.io/badge/Code%20%26%20Data-Available-brightgreen"></a>
 </p>
 
 > **SWE-Mutation: Can LLMs Generate Reliable Test Suites in Software Engineering?**
@@ -14,13 +14,14 @@
 
 This repository hosts the official code and data of **SWE-Mutation**, a repository-level benchmark that evaluates whether LLM-generated **test suites** are reliable and discriminative enough to be used as verification oracles for software engineering tasks. Instead of measuring a test suite against a single golden solution, SWE-Mutation confronts it with **systematically mutated** buggy solutions produced by an **agentic, language-agnostic mutation framework**, and asks: *how many realistic bugs can your tests actually catch?*
 
-> Benchmark data (**coming soon**). Code is available now. Star / watch the repository to be notified when data drops.
+> Code and curated mutation data are available now. The released mutation dataset is [`data/curated_mutations.jsonl`](data/curated_mutations.jsonl).
 
 ---
 
 ## News
 
-- **[2026/04]** Paper released. Code and benchmark data are being cleaned up and will be released here shortly.
+- **[2026/07]** Released the curated mutation dataset: [`data/curated_mutations.jsonl`](data/curated_mutations.jsonl).
+- **[2026/04]** Paper released and the initial codebase published.
 
 ---
 
@@ -52,13 +53,25 @@ SWE-Mutation measures test-suite quality by how well it resists **agent-crafted,
 
 ## Benchmark Statistics
 
-| Split                     | Instances | Mutants | Languages                                 |
-|---------------------------|-----------|---------|-------------------------------------------|
-| SWE-Mutation (Python)     | 500       | 1,664   | Python                                    |
-| SWE-Mutation-Multilingual | 300       | 972     | C, C++, Java, TS, JS, Rust, Go, PHP, Ruby |
-| **Total**                 | **800**   | **2,636** | **10**                                  |
+| Split                     | Instances | Mutation records | Languages                                 |
+|---------------------------|-----------|------------------|-------------------------------------------|
+| Released curated dataset  | 800       | 3,934            | Python, C, C++, Java, TS, JS, Rust, Go, PHP, Ruby |
 
-Each instance ships with **3–5 mutants** selected by a self-play procedure so that they evade at least 3 out of 10 sampled model-generated test suites, ensuring non-trivial difficulty.
+The released JSONL stores one curated mutation per line. Most instances ship with **3–5 mutants** selected by a self-play procedure so that they evade at least 3 out of 10 sampled model-generated test suites, ensuring non-trivial difficulty.
+
+---
+
+## Data
+
+The curated mutation dataset is available at [`data/curated_mutations.jsonl`](data/curated_mutations.jsonl). Each line is a JSON object with:
+
+- `instance_id`: benchmark instance identifier.
+- `mutation.strategy_group`: high-level mutation strategy group.
+- `mutation.strategy_code`: concrete mutation strategy code.
+- `mutation.diff`: unified diff for the mutant, when patch text is available.
+- `mutation.explanation`: rationale for the mutation.
+
+This file is the released curated mutation set. The generation and evaluation scripts still use their native `instances.jsonl` and `preds.json` formats when regenerating mutants or scoring model-produced test suites; pass those files with `--patches-file` and `--mutants-file` as needed.
 
 ---
 
@@ -146,9 +159,8 @@ Full results on SWE-Mutation-Multilingual (9 languages) and additional ablations
 
 ```
 SWE-Mutation/
-├── data/                              # 🚧 coming soon — benchmark splits
-│   ├── swe_mutation/                  #     Python split (500 instances, 1,664 mutants)
-│   └── swe_mutation_multi/            #     9-language split (300 instances, 972 mutants)
+├── data/
+│   └── curated_mutations.jsonl        # Released curated mutation dataset (3,934 records / 800 instances)
 │
 ├── framework/                         # Agentic Mutation Framework
 │   ├── locate.py                      #   Locate module — Tree-sitter AST + F2P trace annotation
@@ -188,17 +200,33 @@ cd SWE-Mutation
 pip install -e ".[dev]"
 ```
 
-### 2. Generate mutants (agentic framework)
+### 2. Inspect the released curated mutations
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("data/curated_mutations.jsonl")
+rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+print(f"mutation records: {len(rows)}")
+print(f"instances: {len({row['instance_id'] for row in rows})}")
+PY
+```
+
+### 3. Generate mutants (optional, agentic framework)
+
+To regenerate mutants, provide the benchmark instance metadata through `--patches-file`:
 
 ```bash
 bash scripts/run_pipeline.sh \
-  --patches-file data/swe_mutation/instances.jsonl \
+  --patches-file path/to/instances.jsonl \
   --model claude-sonnet-4-20250514 \
   --mode generate_mutants \
   --workers 4
 ```
 
-### 3. Evaluate a model's test suites
+### 4. Evaluate a model's test suites
 
 Run your model/agent on the test-generation or test-repair task first (producing a `preds.json`), then:
 
@@ -210,7 +238,7 @@ bash scripts/run_pipeline.sh \
   --mutants-file results/mutants/preds.json
 ```
 
-### 4. Reproduce mutation-strategy ablation (Table 5)
+### 5. Reproduce mutation-strategy ablation (Table 5)
 
 ```bash
 # Few-shot baseline
