@@ -20,3 +20,11 @@ Thumbs.db
 build/
 dist/
 *.log
+
+# Temp / cache
+tmp_swebench/
+repo-cache/
+tmp/
+predictions/
+image_build_logs/
+eval_results/

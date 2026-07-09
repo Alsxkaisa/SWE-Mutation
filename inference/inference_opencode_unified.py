@@ -368,14 +368,20 @@ def ensure_src_instance_image(instance: dict) -> str:
         print(f"  Building src instance image: {image_key}")
         from swebench.harness.test_spec.test_spec import make_test_spec
         from swebench.harness.docker_build import build_instance_image as sweb_build_image
-        import logging
-        spec = make_test_spec(instance)
-        sweb_build_image(
-            test_spec=spec,
-            client=client,
-            logger=logging.getLogger(f"build-{instance.get('instance_id', 'unknown')}"),
-            nocache=False,
-        )
+        from swebench.harness.docker_build import setup_logger, close_logger
+        log_dir = PROJECT_ROOT / "image_build_logs"
+        log_file = log_dir / image_key.replace(":", "__").replace("/", "_") / "build_instance.log"
+        logger = setup_logger(instance.get("instance_id", "unknown"), log_file)
+        try:
+            spec = make_test_spec(instance)
+            sweb_build_image(
+                test_spec=spec,
+                client=client,
+                logger=logger,
+                nocache=False,
+            )
+        finally:
+            close_logger(logger)
         print(f"  Src instance image built: {image_key}")
         return image_key
 
