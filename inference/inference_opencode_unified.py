@@ -77,7 +77,7 @@ EVAL_DIR_DEFAULT = PROJECT_ROOT / "eval_results"
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 DEFAULT_TIMEOUT = 600
-SKILL_NAME = "swe-mutation"
+SKILL_NAME = "dt-generation"
 OPCODE_VERSION = "v1.17.9"
 GIT_BASE_URL = os.environ.get("GIT_BASE_URL", "https://github.com")
 
@@ -361,7 +361,7 @@ def ensure_src_instance_image(instance: dict) -> str:
         raise
 
 
-def build_inference_image(src_image_key: str, skill_src: Path) -> str:
+def build_inference_image(src_image_key: str, skill_name: str, skill_src: Path) -> str:
     inference_image_key = src_image_key.replace("sweb.eval", "swt-mut.eval")
 
     client = docker.from_env()
@@ -375,30 +375,11 @@ def build_inference_image(src_image_key: str, skill_src: Path) -> str:
     print(f"  Building inference image: {inference_image_key}")
     ocode_arch = "arm64" if "arm64" in src_image_key else "x64"
 
-    dockerfile = f"""FROM {src_image_key}
-RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /home/nonroot/.local/state && chown -R nonroot:nonroot /home/nonroot/.local
-RUN mkdir -p /home/nonroot/.local/share/opencode && chown -R nonroot:nonroot /home/nonroot/.local/share/opencode
-RUN mkdir -p /home/nonroot/.local/share/uv && chown -R nonroot:nonroot /home/nonroot/.local/share/uv
-RUN chown -R nonroot:nonroot /testbed
-RUN curl -fsSL "https://github.com/anomalyco/opencode/releases/download/{OPCODE_VERSION}/opencode-linux-{ocode_arch}.tar.gz" \
-    | tar xz -C /usr/local/bin opencode
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    cp /root/.local/bin/uv /usr/local/bin/uv && \
-    cp /root/.local/bin/uvx /usr/local/bin/uvx && \
-    chmod +x /usr/local/bin/uv /usr/local/bin/uvx
-RUN mkdir -p /home/nonroot/.opencode/skills
-"""
-
     with tempfile.TemporaryDirectory() as tmpdir:
-        df_path = Path(tmpdir) / "Dockerfile"
-        df_path.write_text(dockerfile)
-
-        # Copy skill into build context
-        skill_dest = Path(tmpdir) / "swe-mutation"
+        skill_dest = Path(tmpdir) / skill_name
         shutil.copytree(str(skill_src), str(skill_dest))
 
-        dockerfile_with_skill = f"""FROM {src_image_key}
+        dockerfile = f"""FROM {src_image_key}
 RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /home/nonroot/.local/state && chown -R nonroot:nonroot /home/nonroot/.local
 RUN mkdir -p /home/nonroot/.local/share/opencode && chown -R nonroot:nonroot /home/nonroot/.local/share/opencode
@@ -410,11 +391,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     cp /root/.local/bin/uv /usr/local/bin/uv && \
     cp /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx
-RUN mkdir -p /home/nonroot/.opencode/skills/swe-mutation
-COPY swe-mutation/SKILL.md /home/nonroot/.opencode/skills/swe-mutation/SKILL.md
+RUN mkdir -p /home/nonroot/.opencode/skills/{skill_name}
+COPY {skill_name}/SKILL.md /home/nonroot/.opencode/skills/{skill_name}/SKILL.md
 RUN chown -R nonroot:nonroot /home/nonroot/.opencode
 """
-        df_path.write_text(dockerfile_with_skill)
+        Path(tmpdir / "Dockerfile").write_text(dockerfile)
 
         try:
             result = client.images.build(
@@ -809,7 +790,8 @@ def generate_mutants(args):
         print("Nothing to do.")
         return output_path
 
-    skill_src = SKILLS_DIR / "skills" / SKILL_NAME
+    skill_name = args.skill
+    skill_src = SKILLS_DIR / "skills" / skill_name
     if not (skill_src / "SKILL.md").exists():
         print(f"Skill not found at {skill_src}/SKILL.md")
         sys.exit(1)
@@ -868,7 +850,7 @@ def generate_mutants(args):
             if image_name not in image_cache:
                 try:
                     ensure_src_instance_image({"instance_id": instance_id, "image_name": image_name})
-                    image_cache[image_name] = build_inference_image(image_name, skill_src)
+                    image_cache[image_name] = build_inference_image(image_name, skill_name, skill_src)
                 except Exception as e:
                     print(f"  FAILED to build inference image: {e}")
                     failed_ids.append(instance_id)
@@ -883,7 +865,7 @@ def generate_mutants(args):
                 print(f"\n  --- Round {round_idx}/5: {group_name} ---")
 
                 prompt = prompt_template.format(
-                    skill=SKILL_NAME,
+                    skill=skill_name,
                     strategy_group=group_code,
                     strategy_group_name=group_name,
                     allowed_strategies=str(strategies),
@@ -1058,6 +1040,8 @@ def main():
                         help="opencode agent to use")
     parser.add_argument("--run-id", default=None,
                         help="Run identifier for resume")
+    parser.add_argument("--skill", default=SKILL_NAME,
+                        help=f"Skill name to use (default: {SKILL_NAME})")
     parser.add_argument("--retry-limit", type=int, default=2,
                         help="Retries per round after rejection")
 

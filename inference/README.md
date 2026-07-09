@@ -2,7 +2,8 @@
 
 ## Overview
 
-This directory contains the opencode-based inference pipeline for SWE-Mutation. Instead of using Mini-SWE-Agent as the agent runtime, `inference_opencode_unified.py` uses **opencode** to drive the mutation agent and integrates mutation strategies via an **opencode skill**.
+This directory contains the opencode-based inference pipeline for SWE-Mutation. Instead of using Mini-SWE-Agent as the agent runtime, `inference_opencode_unified.py` uses **opencode** to drive the agent and integrates task definitions via an **opencode skill** (default: `dt-generation`).
+
 
 ### Architecture
 
@@ -17,7 +18,7 @@ inference image (swt-mut.eval.*)
   │
   ├── ① start container, mount workspace + opencode config
   ├── ② apply golden patches (code_patch + test_patch)
-  ├── ③ run opencode with prompt referencing /swe-mutation skill
+  ├── ③ run opencode with prompt referencing /{skill} skill
   ├── ④ extract candidate diff from <patch> tags
   ├── ⑤ Judge: verify F2P tests fail against mutated code
   │
@@ -78,6 +79,8 @@ The benchmark instance metadata from [SWE-bench](https://github.com/princeton-nl
 
 ### 2. Generate Mutants
 
+Default skill is `dt-generation`. Use `--skill` to override:
+
 ```bash
 python inference/inference_opencode_unified.py \
     --mode generate_mutants \
@@ -131,6 +134,7 @@ python inference/inference_opencode_unified.py \
 | `--timeout` | `600` | Per-instance timeout (seconds) |
 | `--instance-ids` | all | Space-separated list of specific instance IDs |
 | `--agent` | default | opencode agent name (e.g., `build`) |
+| `--skill` | `dt-generation` | Skill name to load from `.opencode/skills/<name>/SKILL.md` |
 | `--run-id` | auto (timestamp) | Run identifier for resume |
 | `--retry-limit` | `2` | Judge retries per strategy round |
 | `--repo-cache` | `./repo-cache` | Git clone cache directory |
@@ -154,9 +158,9 @@ python inference/inference_opencode_unified.py \
 
 ### Prompt + Skill Integration
 
-The prompt template (`prompts/opencode_skill.txt`) starts with `/{skill}` which tells opencode to load the skill from `.opencode/skills/{skill_name}/SKILL.md`. The skill (`swe-mutation`) contains all five strategy groups (A–E) with 18 sub-strategies, quality guidelines, and output format requirements.
+The prompt template (`prompts/opencode_skill.txt`) starts with `/{skill}` which tells opencode to load the skill from `.opencode/skills/{skill_name}/SKILL.md`. The skill (default: `dt-generation`) defines the task instructions, strategies, and output format.
 
-When the prompt is formatted at runtime, `{skill}` is replaced with `swe-mutation` and instance-specific variables (`{issue}`, `{strategy_group}`, `{allowed_files}`, etc.) are filled in.
+When the prompt is formatted at runtime, `{skill}` is replaced with the value of `--skill` (default `dt-generation`) and instance-specific variables (`{issue}`, `{strategy_group}`, `{allowed_files}`, etc.) are filled in.
 
 ### Per-Round Strategy Execution
 
@@ -170,7 +174,7 @@ For each instance, five rounds are executed — one per strategy group. In each 
 
 ### Inference Image Caching
 
-Inference images are built once per SWE-bench base image and cached in Docker. The image adds opencode, uv, and the `swe-mutation` skill on top of the existing SWE-bench evaluation image, then reused across instances sharing the same base.
+Inference images are built once per SWE-bench base image and cached in Docker. The image adds opencode, uv, and the configured skill on top of the existing SWE-bench evaluation image, then reused across instances sharing the same base.
 
 ### Output Format
 
@@ -194,7 +198,7 @@ Results are written to `preds.json` in a format compatible with `evaluation/eval
 |--------|-------------------------------|-------------------------------------------|
 | Agent framework | `mini-swe-agent` / `DefaultAgent` | `opencode` CLI |
 | Agent interaction | Python-in-process, step-by-step bash | Autonomous agent in Docker container |
-| Strategy injection | Jinja2 template in YAML config | `/swe-mutation` skill via `SKILL.md` |
+| Strategy injection | Jinja2 template in YAML config | `/{skill}` skill via `SKILL.md` |
 | Image management | `swebench.harness.test_spec` | Direct Docker SDK (`docker build`) |
 | Judge verification | `DockerEnvironment` (mini-swe-agent) | Raw `docker exec` (no agent dependency) |
 | Output | `preds.json` (JSON object per instance) | Same format (compatible) |
