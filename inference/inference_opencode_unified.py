@@ -524,10 +524,18 @@ fi
 # ---------------------------------------------------------------------------
 
 def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_diff: str,
-                 f2p_tests: list[str], test_cmd: str, instance_id: str = "") -> dict:
-    """Verify the candidate mutant causes at least one F2P test to fail."""
+                 f2p_tests: list[str], test_cmd: str, instance_id: str = "",
+                 log_dir: Path = None) -> dict:
+    """Verify the candidate mutant causes at least one F2P test to fail.
+
+    If log_dir is given, saves candidate diff, git output, and test output to files.
+    """
     if not f2p_tests:
         return {"ok": False, "reason": "no_f2p_tests"}
+
+    if log_dir:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "candidate.diff").write_text(candidate_diff, encoding="utf-8")
 
     container_name = f"judge-{instance_id}-{uuid.uuid4().hex[:8]}"
 
@@ -553,17 +561,25 @@ def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_di
         _run_simple(["docker", "exec", container_name, "bash", "-c", "git reset --hard && git clean -fd && git checkout ."], timeout=30, check=False)
         _run_simple(["docker", "exec", container_name, "bash", "-c", "git config --global user.email 'judge@swe-mutation.dev' && git config --global user.name 'Judge'"], timeout=10, check=False)
 
+        def _save_log(name: str, content: str):
+            if log_dir:
+                (log_dir / name).write_text(content, encoding="utf-8")
+
         if not _apply_patch_in_container(container_name, code_patch, "code"):
+            _save_log("judge_error.txt", "code_patch_apply_failed")
             return {"ok": False, "reason": "code_patch_apply_failed"}
         if not _apply_patch_in_container(container_name, test_patch, "test"):
+            _save_log("judge_error.txt", "test_patch_apply_failed")
             return {"ok": False, "reason": "test_patch_apply_failed"}
         _run_simple(["docker", "exec", container_name, "bash", "-c", "git add -A && git commit --allow-empty -m 'chore: apply baseline patches'"], timeout=30, check=False)
 
         if not _apply_patch_in_container(container_name, candidate_diff, "candidate"):
+            _save_log("judge_error.txt", "candidate_apply_failed")
             return {"ok": False, "reason": "candidate_apply_failed"}
 
         # Run F2P tests
         if not test_cmd:
+            _save_log("judge_error.txt", "no_test_cmd")
             return {"ok": False, "reason": "no_test_cmd"}
 
         if f2p_tests:
@@ -586,6 +602,7 @@ def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_di
             timeout=120, check=False,
         )
         output = r.stdout + r.stderr
+        _save_log("test_output.txt", output)
 
         parsed = _parse_test_output(output)
         f2p_failed = parsed.get("failed", 0) > 0 or parsed.get("errors", 0) > 0
@@ -597,9 +614,15 @@ def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_di
             "output": output[-2000:],
         }
     except subprocess.TimeoutExpired:
-        return {"ok": False, "reason": "timeout"}
+        reason = "timeout"
+        if log_dir:
+            (log_dir / "judge_error.txt").write_text(reason)
+        return {"ok": False, "reason": reason}
     except Exception as e:
-        return {"ok": False, "reason": f"error: {e}"}
+        reason = f"error: {e}"
+        if log_dir:
+            (log_dir / "judge_error.txt").write_text(reason)
+        return {"ok": False, "reason": reason}
     finally:
         _run_simple(["docker", "rm", "-f", container_name], timeout=10, check=False)
 
@@ -905,11 +928,21 @@ def generate_mutants(args):
                     elapsed = time.time() - t0
                     print(f"    opencode finished (exit={result.returncode}, elapsed={elapsed:.0f}s)")
 
+                    round_log_dir = run_workspace / instance_id / f"round{round_idx}_{group_code}"
+                    round_log_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Save opencode raw log (same pattern as reference)
+                    (round_log_dir / "opencode_output.log").write_text(
+                        f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}",
+                        encoding="utf-8",
+                    )
+                    print(f"    Log → {round_log_dir / 'opencode_output.log'}")
+
                     # Save session export
                     if session_export and session_export.exists():
-                        session_dst = run_workspace / instance_id / f"round{round_idx}_{group_code}_session.json"
-                        session_dst.parent.mkdir(parents=True, exist_ok=True)
+                        session_dst = round_log_dir / "session.json"
                         shutil.move(str(session_export), str(session_dst))
+                        print(f"    Session → {session_dst}")
 
                     # Extract candidate patch
                     candidate_diff = extract_patch(result.stdout, worktree_path)
@@ -922,10 +955,13 @@ def generate_mutants(args):
 
                     # Judge verification
                     print(f"    Running Judge (F2P verification) ...")
+                    judge_log_dir = run_workspace / instance_id / f"round{round_idx}_{group_code}" / "judge"
                     judge_result = judge_mutant(
                         src_image_key, code_patch, test_patch, candidate_diff,
                         f2p_tests, test_cmd, instance_id,
+                        log_dir=judge_log_dir,
                     )
+                    print(f"    Judge logs → {judge_log_dir}")
 
                     if judge_result.get("ok"):
                         accepted = True

@@ -201,6 +201,40 @@ Results are written to `preds.json` in a format compatible with `evaluation/eval
 
 ---
 
+## Logs & Artifacts
+
+For each instance and strategy round, the following log files are saved under `<workspace-dir>/<run-id>/<instance_id>/round_<N>_<group>/`:
+
+| File | Description |
+|------|-------------|
+| `opencode_output.log` | Raw opencode stdout + stderr |
+| `session.json` | opencode session export (transcript, if available) |
+| `judge/candidate.diff` | Candidate mutant patch extracted from opencode |
+| `judge/test_output.txt` | Full F2P test execution output |
+| `judge/judge_error.txt` | Judge failure reason (only on rejection) |
+
+Example layout:
+
+```
+tmp/workspaces/20260709_104835/
+├── django__django-15202/
+│   ├── round_1_A/
+│   │   ├── opencode_output.log
+│   │   ├── session.json
+│   │   └── judge/
+│   │       ├── candidate.diff
+│   │       ├── test_output.txt
+│   │       └── judge_error.txt
+│   ├── round_2_B/
+│   │   └── ...
+│   └── ...
+└── ...
+```
+
+Use `--workspace-dir` to change the root directory (default: `./tmp/workspaces`).
+
+---
+
 ## Comparison with Mini-SWE-Agent Pipeline
 
 | Aspect | Mini-SWE-Agent (`mutation.py`) | opencode (`inference_opencode_unified.py`) |
