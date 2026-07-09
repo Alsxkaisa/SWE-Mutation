@@ -63,7 +63,7 @@ import docker
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
-SKILLS_DIR = PROJECT_ROOT / ".opencode"
+# SKILLS_DIR is unused; skill is mounted from host ~/.opencode at runtime
 OPCODE_CONFIG_PATH = SCRIPT_DIR / "opencode.json"
 PROMPT_SKILL_PATH = PROMPTS_DIR / "opencode_skill.txt"
 
@@ -361,7 +361,7 @@ def ensure_src_instance_image(instance: dict) -> str:
         raise
 
 
-def build_inference_image(src_image_key: str, skill_name: str, skill_src: Path) -> str:
+def build_inference_image(src_image_key: str) -> str:
     inference_image_key = src_image_key.replace("sweb.eval", "swt-mut.eval")
 
     client = docker.from_env()
@@ -375,11 +375,7 @@ def build_inference_image(src_image_key: str, skill_name: str, skill_src: Path) 
     print(f"  Building inference image: {inference_image_key}")
     ocode_arch = "arm64" if "arm64" in src_image_key else "x64"
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        skill_dest = Path(tmpdir) / skill_name
-        shutil.copytree(str(skill_src), str(skill_dest))
-
-        dockerfile = f"""FROM {src_image_key}
+    dockerfile = f"""FROM {src_image_key}
 RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /home/nonroot/.local/state && chown -R nonroot:nonroot /home/nonroot/.local
 RUN mkdir -p /home/nonroot/.local/share/opencode && chown -R nonroot:nonroot /home/nonroot/.local/share/opencode
@@ -391,12 +387,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     cp /root/.local/bin/uv /usr/local/bin/uv && \
     cp /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx
-RUN mkdir -p /home/nonroot/.opencode/skills/{skill_name}
-COPY {skill_name}/SKILL.md /home/nonroot/.opencode/skills/{skill_name}/SKILL.md
-RUN chown -R nonroot:nonroot /home/nonroot/.opencode
 """
-        Path(tmpdir / "Dockerfile").write_text(dockerfile)
 
+    with tempfile.TemporaryDirectory() as tmpdir:
+        Path(tmpdir / "Dockerfile").write_text(dockerfile)
         try:
             result = client.images.build(
                 path=tmpdir,
@@ -791,10 +785,6 @@ def generate_mutants(args):
         return output_path
 
     skill_name = args.skill
-    skill_src = SKILLS_DIR / "skills" / skill_name
-    if not (skill_src / "SKILL.md").exists():
-        print(f"Skill not found at {skill_src}/SKILL.md")
-        sys.exit(1)
 
     prompt_template = PROMPT_SKILL_PATH.read_text() if PROMPT_SKILL_PATH.exists() else ""
     if not prompt_template:
@@ -850,7 +840,7 @@ def generate_mutants(args):
             if image_name not in image_cache:
                 try:
                     ensure_src_instance_image({"instance_id": instance_id, "image_name": image_name})
-                    image_cache[image_name] = build_inference_image(image_name, skill_name, skill_src)
+                    image_cache[image_name] = build_inference_image(image_name)
                 except Exception as e:
                     print(f"  FAILED to build inference image: {e}")
                     failed_ids.append(instance_id)
