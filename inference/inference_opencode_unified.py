@@ -964,7 +964,7 @@ def generate_mutants(args):
                     # Judge verification
                     print(f"    Running Judge (F2P verification) ...")
                     judge_result = judge_mutant(
-                        image_name, code_patch, test_patch, candidate_diff,
+                        src_image_key, code_patch, test_patch, candidate_diff,
                         f2p_tests, test_cmd, instance_id,
                     )
 
