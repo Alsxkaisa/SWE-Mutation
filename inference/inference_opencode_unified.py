@@ -365,9 +365,19 @@ def ensure_src_instance_image(instance: dict) -> str:
         print(f"  Src image exists: {image_key[:60]}...")
         return image_key
     except docker.errors.ImageNotFound:
-        print(f"  Src image not found: {image_key}")
-        print(f"  Build it first with swebench harness tools.")
-        raise
+        print(f"  Building src instance image: {image_key}")
+        from swebench.harness.test_spec.test_spec import make_test_spec
+        from swebench.harness.docker_build import build_instance_image as sweb_build_image
+        import logging
+        spec = make_test_spec(instance)
+        sweb_build_image(
+            test_spec=spec,
+            client=client,
+            logger=logging.getLogger(f"build-{instance.get('instance_id', 'unknown')}"),
+            nocache=False,
+        )
+        print(f"  Src instance image built: {image_key}")
+        return image_key
 
 
 def build_inference_image(src_image_key: str) -> str:
