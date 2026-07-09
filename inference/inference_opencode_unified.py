@@ -548,7 +548,7 @@ def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_di
         try:
             _run_simple(["docker", "cp", host_patch, f"{container}:/tmp/{label}.patch"], timeout=30, check=True)
             r = _run_simple(
-                ["docker", "exec", container, "bash", "-c", f"git apply -p1 /tmp/{label}.patch 2>&1"],
+                ["docker", "exec", container, "bash", "-c", f"git apply --whitespace=fix -p1 /tmp/{label}.patch 2>&1"],
                 timeout=30, check=False,
             )
             if r.returncode != 0:
