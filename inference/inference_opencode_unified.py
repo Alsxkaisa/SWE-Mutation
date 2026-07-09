@@ -358,7 +358,9 @@ def get_instance_test_cmd(instance):
 # ---------------------------------------------------------------------------
 
 def ensure_src_instance_image(instance: dict) -> str:
-    image_key = get_swebench_docker_image_name(instance)
+    from swebench.harness.test_spec.test_spec import make_test_spec
+    spec = make_test_spec(instance, arch="x86_64")
+    image_key = spec.instance_image_key
     client = docker.from_env()
     try:
         client.images.get(image_key)
@@ -366,23 +368,19 @@ def ensure_src_instance_image(instance: dict) -> str:
         return image_key
     except docker.errors.ImageNotFound:
         print(f"  Building src instance image: {image_key}")
-        from swebench.harness.docker_build import build_instance_images as sweb_build_all
-        successful, failed = sweb_build_all(
-            client=client,
-            dataset=[instance],
-            force_rebuild=False,
-            max_workers=1,
-            tag="latest",
-            env_image_tag="latest",
-        )
-        # Verify image exists after build
+        from swebench.harness.docker_build import build_instance_image as sweb_build_image
+        from swebench.harness.docker_build import setup_logger, close_logger
+        log_dir = PROJECT_ROOT / "image_build_logs"
+        log_file = log_dir / image_key.replace(":", "__").replace("/", "_") / "build.log"
+        logger = setup_logger(instance.get("instance_id", "unknown"), log_file)
         try:
-            client.images.get(image_key)
-        except docker.errors.ImageNotFound:
-            raise RuntimeError(
-                f"Image {image_key} not found after build. "
-                f"Successful builds: {successful}, Failed: {failed}"
-            )
+            from swebench.harness.docker_build import build_env_images
+            build_env_images(test_specs=[spec], client=client, logger=logger, nocache=False)
+            sweb_build_image(test_spec=spec, client=client, logger=logger, nocache=False)
+        finally:
+            close_logger(logger)
+        # Verify image exists after build
+        client.images.get(image_key)
         print(f"  Src instance image built: {image_key}")
         return image_key
 
@@ -883,19 +881,18 @@ def generate_mutants(args):
             _run_simple(["git", "add", "-A", "&&", "git", "commit", "--allow-empty", "-m", "baseline"],
                         cwd=worktree_path, timeout=30, check=False)
 
-            # Get Docker image
-            image_name = instance.get("image_name") or get_swebench_docker_image_name(instance)
+            # Build src instance image (uses TestSpec.instance_image_key)
+            src_image_key = ensure_src_instance_image(instance)
 
-            # Build inference image (cache keyed by src image)
-            if image_name not in image_cache:
+            # Build inference image on top (cache keyed by src image)
+            if src_image_key not in image_cache:
                 try:
-                    ensure_src_instance_image(instance)
-                    image_cache[image_name] = build_inference_image(image_name)
+                    image_cache[src_image_key] = build_inference_image(src_image_key)
                 except Exception as e:
                     print(f"  FAILED to build inference image: {e}")
                     failed_ids.append(instance_id)
                     continue
-            inference_image = image_cache[image_name]
+            inference_image = image_cache[src_image_key]
 
             test_cmd = get_instance_test_cmd(instance)
 
