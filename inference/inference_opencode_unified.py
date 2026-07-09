@@ -882,7 +882,7 @@ def generate_mutants(args):
             # Build inference image (cache keyed by src image)
             if image_name not in image_cache:
                 try:
-                    ensure_src_instance_image({"instance_id": instance_id, "image_name": image_name})
+                    ensure_src_instance_image(instance)
                     image_cache[image_name] = build_inference_image(image_name)
                 except Exception as e:
                     print(f"  FAILED to build inference image: {e}")
