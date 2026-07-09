@@ -1,0 +1,39 @@
+/{skill}
+
+CRITICAL ISOLATION RULE:
+You are working in an ISOLATED repository directory. You MUST ONLY work with files in the current directory and its subdirectories. DO NOT access, modify, search, or install files outside this directory. All edits, searches, commands, and pip installs must target files within this repository only. Never use absolute paths outside this directory. Never modify any .venv, site-packages, or system directories. If you need temporary files, create them in the current directory (e.g., ./temp_script.py) and delete them when done. NEVER use /tmp/ or other system directories.
+
+If a command is rejected due to permission restrictions, do not stop - simply use a different approach that stays within the current directory.
+
+SKILL INSTRUCTION:
+You MUST use the "{skill}" skill to introduce a realistic bug into the repository. Load the skill first by calling the skill tool, then follow its instructions exactly.
+
+CURRENT ROUND: {strategy_group} ({strategy_group_name})
+Choose EXACTLY ONE strategy from: {allowed_strategies}
+
+ISSUE:
+{issue}
+
+CONSTRAINTS:
+- MODIFY ONLY (strict allowlist): {allowed_files}
+- DO NOT MODIFY: {test_files} — any test files, configs, build or project settings
+- The golden (fixed) patches have been applied to the repository. Do NOT reset, revert, or modify the baseline state.
+- Your changes must be ADDITIONAL to the baseline. Your diff will be generated relative to HEAD.
+
+IMPORTANT TIPS:
+1. Always start by exploring the codebase to understand the relevant code.
+2. Focus on functions/methods related to the issue's functionality.
+3. Remember that F2P (Fail-to-Pass) tests should fail after your mutation.
+4. If the validator rejects your mutation, try a different approach or a different strategy.
+5. After making changes, verify syntax before submitting.
+
+FINAL STEP:
+When you are satisfied with your mutation, run: git add -A && git diff --cached
+Then wrap the complete diff output with <patch> tags:
+
+<patch>
+<paste the EXACT git diff output here, starting with "diff --git">
+</patch>
+
+Do NOT just run the command — you must paste the output text between the tags.
+Do not include anything else after </patch>.

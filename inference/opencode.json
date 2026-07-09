@@ -1,0 +1,10 @@
+{
+  "permission": {
+    "external_directory": {
+      "*": "deny",
+      "/home/nonroot/.opencode/skills/swe-mutation/*": "allow",
+      "/home/nonroot/.local/share/opencode/tool-output/*": "allow",
+      "/tmp/opencode/*": "allow"
+    }
+  }
+}
