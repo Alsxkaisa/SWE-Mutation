@@ -357,17 +357,21 @@ def get_instance_test_cmd(instance):
 # Docker image management
 # ---------------------------------------------------------------------------
 
-def ensure_src_instance_image(instance: dict) -> str:
+def ensure_src_instance_image(instance: dict, force_rebuild: bool = False) -> str:
     from swebench.harness.test_spec.test_spec import make_test_spec
     spec = make_test_spec(instance, arch="x86_64")
     image_key = spec.instance_image_key
     client = docker.from_env()
-    try:
-        client.images.get(image_key)
-        print(f"  Src image exists: {image_key[:60]}...")
-        return image_key
-    except docker.errors.ImageNotFound:
-        print(f"  Building src instance image: {image_key}")
+    if force_rebuild:
+        _remove_image(image_key)
+    else:
+        try:
+            client.images.get(image_key)
+            print(f"  Src image exists: {image_key[:60]}...")
+            return image_key
+        except docker.errors.ImageNotFound:
+            pass
+    print(f"  Building src instance image: {image_key}")
         from swebench.harness.docker_build import build_instance_image as sweb_build_image
         from swebench.harness.docker_build import setup_logger, close_logger
         log_dir = PROJECT_ROOT / "image_build_logs"
@@ -385,22 +389,31 @@ def ensure_src_instance_image(instance: dict) -> str:
         return image_key
 
 
-def build_inference_image(src_image_key: str) -> str:
+def _remove_image(image_key: str):
+    import subprocess
+    subprocess.run(["docker", "rmi", "-f", image_key], capture_output=True, timeout=60)
+
+
+def build_inference_image(src_image_key: str, force_rebuild: bool = False) -> str:
     inference_image_key = src_image_key.replace("sweb.eval", "swt-mut.eval")
 
     client = docker.from_env()
-    try:
-        client.images.get(inference_image_key)
-        print(f"  Inference image exists: {inference_image_key[:60]}...")
-        return inference_image_key
-    except docker.errors.ImageNotFound:
-        pass
+    if force_rebuild:
+        _remove_image(inference_image_key)
+    else:
+        try:
+            client.images.get(inference_image_key)
+            print(f"  Inference image exists: {inference_image_key[:60]}...")
+            return inference_image_key
+        except docker.errors.ImageNotFound:
+            pass
 
     print(f"  Building inference image: {inference_image_key}")
     ocode_arch = "arm64" if "arm64" in src_image_key else "x64"
 
     dockerfile = f"""FROM {src_image_key}
-RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates && rm -rf /var/lib/apt/lists/*
+USER root
+RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates && rm -rf /var/lib/apt/lists/* || true
 RUN mkdir -p /home/nonroot/.local/state && chown -R nonroot:nonroot /home/nonroot/.local
 RUN mkdir -p /home/nonroot/.local/share/opencode && chown -R nonroot:nonroot /home/nonroot/.local/share/opencode
 RUN mkdir -p /home/nonroot/.local/share/uv && chown -R nonroot:nonroot /home/nonroot/.local/share/uv
@@ -411,6 +424,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     cp /root/.local/bin/uv /usr/local/bin/uv && \
     cp /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx
+USER nonroot
 """
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -882,12 +896,12 @@ def generate_mutants(args):
                         cwd=worktree_path, timeout=30, check=False)
 
             # Build src instance image (uses TestSpec.instance_image_key)
-            src_image_key = ensure_src_instance_image(instance)
+            src_image_key = ensure_src_instance_image(instance, force_rebuild=args.rebuild)
 
             # Build inference image on top (cache keyed by src image)
             if src_image_key not in image_cache:
                 try:
-                    image_cache[src_image_key] = build_inference_image(src_image_key)
+                    image_cache[src_image_key] = build_inference_image(src_image_key, force_rebuild=args.rebuild)
                 except Exception as e:
                     print(f"  FAILED to build inference image: {e}")
                     failed_ids.append(instance_id)
@@ -1081,6 +1095,8 @@ def main():
                         help="Run identifier for resume")
     parser.add_argument("--skill", default=SKILL_NAME,
                         help=f"Skill name to use (default: {SKILL_NAME})")
+    parser.add_argument("--rebuild", action="store_true", default=False,
+                        help="Force rebuild Docker images even if they exist")
     parser.add_argument("--retry-limit", type=int, default=2,
                         help="Retries per round after rejection")
 
