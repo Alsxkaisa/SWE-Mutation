@@ -48,6 +48,12 @@ import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+
+# Add project root to sys.path so that 'evaluation' and 'framework' are importable
+_SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPT_DIR.parent))
+
 import tempfile
 import threading
 import time
@@ -80,6 +86,9 @@ DEFAULT_TIMEOUT = 600
 SKILL_NAME = "dt-generation"
 OPCODE_VERSION = "v1.17.9"
 GIT_BASE_URL = os.environ.get("GIT_BASE_URL", "https://github.com")
+
+# Default dataset (matching swt-bench-inference reference)
+DEFAULT_DATASET = "eth-sri/SWT-bench_Lite_bm25_27k_zsb"
 
 STRATEGY_GROUPS = [
     ("A", "API Specifications & Contracts", ["A1", "A2", "A3", "A4"]),
@@ -684,6 +693,16 @@ def _validate_patch(patch, worktree_path):
     return True, None
 
 
+def extract_allowed_files_from_patch(patch_text: str) -> list[str]:
+    files = []
+    for line in patch_text.splitlines():
+        if line.startswith("+++ b/"):
+            path = line[6:].strip()
+            if path and path not in files and path != "/dev/null":
+                files.append(path)
+    return files
+
+
 def extract_patch(stdout, worktree_path):
     m = re.search(
         r"^\s*<patch>\s*\n?(.*?)\n?\s*</patch>\s*$",
@@ -747,30 +766,44 @@ def generate_mutants(args):
     run_workspace = workspace_dir / run_tag
     run_workspace.mkdir(parents=True, exist_ok=True)
 
-    patches_file = Path(args.patches_file)
-    if not patches_file.exists():
-        print(f"Patches file not found: {patches_file}")
-        sys.exit(1)
-
-    patches = load_patches(patches_file)
-    all_ids = list(patches.keys())
-    if not all_ids:
-        print(f"No instances found in {patches_file}")
-        sys.exit(1)
-
     completed_ids = get_completed_ids(output_path)
     is_resume = len(completed_ids) > 0
+
+    # Load instances: HF dataset, or local patches file if --patches-file is given
+    if args.patches_file:
+        patches_file = Path(args.patches_file)
+        if not patches_file.exists():
+            print(f"Patches file not found: {patches_file}")
+            sys.exit(1)
+        instances = load_patches(patches_file)
+        all_instances = [{"instance_id": iid, **instances[iid]} for iid in instances]
+    else:
+        dataset_name = args.dataset or DEFAULT_DATASET
+        print(f"Loading dataset: {dataset_name}")
+        from datasets import load_dataset as hf_load
+        all_instances = list(hf_load(dataset_name, split="test"))
+
+    # Extract allowed_files from patch if not already present
+    for inst in all_instances:
+        if not inst.get("files") and inst.get("patch"):
+            inst["files"] = extract_allowed_files_from_patch(inst["patch"])
+        if not inst.get("problem_statement") and inst.get("issue"):
+            inst["problem_statement"] = inst["issue"]
+
+    all_ids = [inst["instance_id"] for inst in all_instances]
+    id_to_instance = {inst["instance_id"]: inst for inst in all_instances}
 
     print(f"\nRun ID  : {run_tag}")
     if not args.run_id:
         print(f"  (auto-generated; to resume: --run-id {run_tag})")
+    print(f"Dataset : {args.dataset or DEFAULT_DATASET}")
     print(f"Output  : {output_path}")
     print(f"Mode    : SKILL-BASED MUTATION")
     if is_resume:
         print(f"Status  : RESUME ({len(completed_ids)} already completed)")
 
     if args.instance_ids:
-        instance_ids = [iid for iid in args.instance_ids if iid in patches and iid not in completed_ids]
+        instance_ids = [iid for iid in args.instance_ids if iid in id_to_instance and iid not in completed_ids]
     else:
         instance_ids = [iid for iid in all_ids if iid not in completed_ids]
 
@@ -798,7 +831,7 @@ def generate_mutants(args):
     failed_ids = []
 
     for idx, instance_id in enumerate(instance_ids):
-        instance = patches[instance_id]
+        instance = id_to_instance[instance_id]
         repo = instance["repo"]
         base_commit = instance["base_commit"]
         issue = instance["problem_statement"]
@@ -1010,8 +1043,10 @@ def main():
     parser.add_argument("--mode", default="generate_mutants",
                         choices=["generate_mutants", "run_eval", "all"],
                         help="Pipeline mode")
-    parser.add_argument("--patches-file", required=True,
-                        help="JSONL file with instance patch data")
+    parser.add_argument("--dataset", default=DEFAULT_DATASET,
+                        help=f"HuggingFace dataset (default: {DEFAULT_DATASET})")
+    parser.add_argument("--patches-file", default=None,
+                        help="JSONL file with instance patch data (overrides --dataset)")
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help="Model name for opencode")
     parser.add_argument("--max-instances", type=int, default=None,
