@@ -372,21 +372,21 @@ def ensure_src_instance_image(instance: dict, force_rebuild: bool = False) -> st
         except docker.errors.ImageNotFound:
             pass
     print(f"  Building src instance image: {image_key}")
-        from swebench.harness.docker_build import build_instance_image as sweb_build_image
-        from swebench.harness.docker_build import setup_logger, close_logger
-        log_dir = PROJECT_ROOT / "image_build_logs"
-        log_file = log_dir / image_key.replace(":", "__").replace("/", "_") / "build.log"
-        logger = setup_logger(instance.get("instance_id", "unknown"), log_file)
-        try:
-            from swebench.harness.docker_build import build_env_images
-            build_env_images(test_specs=[spec], client=client, logger=logger, nocache=False)
-            sweb_build_image(test_spec=spec, client=client, logger=logger, nocache=False)
-        finally:
-            close_logger(logger)
-        # Verify image exists after build
-        client.images.get(image_key)
-        print(f"  Src instance image built: {image_key}")
-        return image_key
+    from swebench.harness.docker_build import build_instance_image as sweb_build_image
+    from swebench.harness.docker_build import setup_logger, close_logger
+    log_dir = PROJECT_ROOT / "image_build_logs"
+    log_file = log_dir / image_key.replace(":", "__").replace("/", "_") / "build.log"
+    logger = setup_logger(instance.get("instance_id", "unknown"), log_file)
+    try:
+        from swebench.harness.docker_build import build_env_images
+        build_env_images(test_specs=[spec], client=client, logger=logger, nocache=False)
+        sweb_build_image(test_spec=spec, client=client, logger=logger, nocache=False)
+    finally:
+        close_logger(logger)
+    # Verify image exists after build
+    client.images.get(image_key)
+    print(f"  Src instance image built: {image_key}")
+    return image_key
 
 
 def _remove_image(image_key: str):
