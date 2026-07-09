@@ -366,22 +366,21 @@ def ensure_src_instance_image(instance: dict) -> str:
         return image_key
     except docker.errors.ImageNotFound:
         print(f"  Building src instance image: {image_key}")
-        from swebench.harness.test_spec.test_spec import make_test_spec
-        from swebench.harness.docker_build import build_instance_image as sweb_build_image
-        from swebench.harness.docker_build import setup_logger, close_logger
-        log_dir = PROJECT_ROOT / "image_build_logs"
-        log_file = log_dir / image_key.replace(":", "__").replace("/", "_") / "build_instance.log"
-        logger = setup_logger(instance.get("instance_id", "unknown"), log_file)
+        from swebench.harness.docker_build import build_instance_images as sweb_build_all
+        successful, failed = sweb_build_all(
+            client=client,
+            dataset=[instance],
+            force_rebuild=False,
+            max_workers=1,
+        )
+        # Verify image exists after build
         try:
-            spec = make_test_spec(instance)
-            sweb_build_image(
-                test_spec=spec,
-                client=client,
-                logger=logger,
-                nocache=False,
+            client.images.get(image_key)
+        except docker.errors.ImageNotFound:
+            raise RuntimeError(
+                f"Image {image_key} not found after build. "
+                f"Successful builds: {successful}, Failed: {failed}"
             )
-        finally:
-            close_logger(logger)
         print(f"  Src instance image built: {image_key}")
         return image_key
 
