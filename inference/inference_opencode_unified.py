@@ -414,7 +414,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 """
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        Path(tmpdir / "Dockerfile").write_text(dockerfile)
+        Path(tmpdir, "Dockerfile").write_text(dockerfile)
         try:
             result = client.images.build(
                 path=tmpdir,
