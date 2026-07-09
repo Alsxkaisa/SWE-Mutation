@@ -210,36 +210,10 @@ def load_patches(patches_file: Path):
     return mapping
 
 
-def load_all_instance_ids(patches_file: Path):
-    ids = []
-    for line in patches_file.read_text().splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        obj = json.loads(s)
-        iid = obj.get("instance_id") or obj.get("id") or obj.get("name")
-        if iid:
-            ids.append(str(iid))
-    return ids
-
-
 def get_completed_ids(output_path):
     if not output_path.exists():
         return set()
-    completed = set()
-    data = json.loads(output_path.read_text())
-    for iid in data:
-        completed.add(iid)
-    return completed
-
-
-def get_swebench_docker_image_name(instance: dict) -> str:
-    image_name = instance.get("image_name")
-    if image_name:
-        return image_name
-    iid = instance["instance_id"]
-    id_docker_compatible = iid.replace("__", "_1776_")
-    return f"swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
+    return set(json.loads(output_path.read_text()))
 
 
 # ---------------------------------------------------------------------------
@@ -372,17 +346,17 @@ def ensure_src_instance_image(instance: dict, force_rebuild: bool = False) -> st
         except docker.errors.ImageNotFound:
             pass
     print(f"  Building src instance image: {image_key}")
-    from swebench.harness.docker_build import build_instance_image as sweb_build_image
-    from swebench.harness.docker_build import setup_logger, close_logger
-    log_dir = PROJECT_ROOT / "image_build_logs"
-    log_file = log_dir / image_key.replace(":", "__").replace("/", "_") / "build.log"
-    logger = setup_logger(instance.get("instance_id", "unknown"), log_file)
-    try:
-        from swebench.harness.docker_build import build_env_images
-        build_env_images(test_specs=[spec], client=client, logger=logger, nocache=False)
-        sweb_build_image(test_spec=spec, client=client, logger=logger, nocache=False)
-    finally:
-        close_logger(logger)
+    from swebench.harness.docker_build import build_instance_images as sweb_build_all
+    sweb_build_all(
+        client=client,
+        dataset=[instance],
+        force_rebuild=False,
+        max_workers=1,
+        tag="latest",
+        env_image_tag="latest",
+    )
+    # Verify the image was actually built
+    client.images.get(image_key)
     # Verify image exists after build
     client.images.get(image_key)
     print(f"  Src instance image built: {image_key}")
@@ -759,21 +733,6 @@ def extract_patch(stdout, worktree_path):
     return ""
 
 
-def is_valid_patch(stdout, patch):
-    if not patch:
-        return False, "empty patch"
-    if "<patch>" not in stdout:
-        return False, "agent did not output <patch> tag"
-    m = re.search(r"^\s*<patch>\s*\n?(.*?)\n?\s*</patch>\s*$", stdout, re.MULTILINE | re.DOTALL)
-    if m:
-        tag_content = m.group(1).strip()
-        if not tag_content:
-            return False, "empty patch tags"
-        if not tag_content.startswith("diff --git"):
-            return False, "patch does not contain valid git diff"
-    return True, None
-
-
 # ---------------------------------------------------------------------------
 # Main logic: generate mutants
 # ---------------------------------------------------------------------------
@@ -1126,7 +1085,10 @@ def main():
         if not args.mutants_file or not args.test_preds_file:
             print("Error: --mutants-file and --test-preds-file required for eval mode")
             sys.exit(1)
-        run_eval(args)
+        try:
+            run_eval(args)
+        except Exception as e:
+            print(f"Evaluation failed (mutants generation succeeded): {e}")
 
 
 if __name__ == "__main__":
