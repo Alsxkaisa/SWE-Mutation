@@ -542,12 +542,21 @@ def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_di
     def _apply_patch_in_container(container, patch_text, label):
         if not patch_text or not patch_text.strip():
             return True
-        marker = f"SWE_MUTATION_{label.upper()}_PATCH_EOF"
-        ps = patch_text.replace("'", "'\\''")
-        cmd = f"cat > /tmp/{label}.patch << '{marker}'\n{patch_text}\n{marker}"
-        _run_simple(["docker", "exec", container, "bash", "-c", cmd], timeout=30, check=True)
-        r = _run_simple(["docker", "exec", container, "bash", "-c", f"git apply -p1 /tmp/{label}.patch 2>&1"], timeout=30, check=False)
-        return r.returncode == 0
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False, encoding='utf-8') as f:
+            f.write(patch_text)
+            host_patch = f.name
+        try:
+            _run_simple(["docker", "cp", host_patch, f"{container}:/tmp/{label}.patch"], timeout=30, check=True)
+            r = _run_simple(
+                ["docker", "exec", container, "bash", "-c", f"git apply -p1 /tmp/{label}.patch 2>&1"],
+                timeout=30, check=False,
+            )
+            if r.returncode != 0:
+                err = (r.stderr.strip() or r.stdout.strip())[:500]
+                print(f"    [judge] git apply failed for {label}: {err}")
+            return r.returncode == 0
+        finally:
+            Path(host_patch).unlink(missing_ok=True)
 
     try:
         _run_simple(
