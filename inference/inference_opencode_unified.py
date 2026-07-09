@@ -372,6 +372,8 @@ def ensure_src_instance_image(instance: dict) -> str:
             dataset=[instance],
             force_rebuild=False,
             max_workers=1,
+            tag="latest",
+            env_image_tag="latest",
         )
         # Verify image exists after build
         try:
