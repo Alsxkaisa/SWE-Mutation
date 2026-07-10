@@ -303,7 +303,7 @@ def apply_patches_in_workspace(worktree_path, code_patch, test_patch):
             return True
         marker = f"SWE_MUTATION_{label.upper()}_PATCH_EOF"
         with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False, dir=worktree_path) as f:
-            f.write(patch_text)
+            f.write(patch_text if patch_text.endswith('\n') else patch_text + '\n')
             patch_file = f.name
         try:
             _run_simple(["git", "apply", "--whitespace=fix", "-p1", patch_file], cwd=worktree_path, timeout=30, check=True)
@@ -550,7 +550,7 @@ def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_di
         if not patch_text or not patch_text.strip():
             return True
         with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False, encoding='utf-8') as f:
-            f.write(patch_text)
+            f.write(patch_text if patch_text.endswith('\n') else patch_text + '\n')
             host_patch = f.name
         try:
             _run_simple(["docker", "cp", host_patch, f"{container}:/tmp/{label}.patch"], timeout=30, check=True)
@@ -792,7 +792,7 @@ def _try_fs_diff(worktree_path):
 def _apply_llm_patch_to_workspace(raw_patch, worktree_path):
     """Try applying LLM-generated patch to workspace, then read back clean diff.
     
-    This converts potentially corrupted LLM patch into a guaranteed-valid
+    Converts potentially corrupted LLM patch into a guaranteed-valid
     git diff by actually applying it and capturing git's output.
     Returns clean diff string, or empty string on failure.
     """
@@ -802,20 +802,21 @@ def _apply_llm_patch_to_workspace(raw_patch, worktree_path):
         return ""
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False, encoding='utf-8') as f:
-            f.write(patch)
+            # git apply requires a trailing newline, otherwise it reports
+            # "corrupt patch" on the last line.
+            f.write(patch if patch.endswith('\n') else patch + '\n')
             patch_file = f.name
         try:
             r = _run_simple(
                 ["git", "apply", "--whitespace=fix", "-p1", patch_file],
                 cwd=worktree_path, timeout=30, check=False,
             )
-            if r.returncode != 0:
-                return ""
-            _run_simple(["git", "add", "-A"], cwd=worktree_path, timeout=10, check=False)
-            r = _run_simple(["git", "diff", "--cached"], cwd=worktree_path, timeout=10, check=False)
-            clean = r.stdout.strip()
-            if clean:
-                return _sanitize_patch(clean)
+            if r.returncode == 0:
+                _run_simple(["git", "add", "-A"], cwd=worktree_path, timeout=10, check=False)
+                r = _run_simple(["git", "diff", "--cached"], cwd=worktree_path, timeout=10, check=False)
+                clean = r.stdout.strip()
+                if clean:
+                    return _sanitize_patch(clean)
         finally:
             Path(patch_file).unlink(missing_ok=True)
     except Exception:
