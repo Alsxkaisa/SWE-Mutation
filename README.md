@@ -1,7 +1,7 @@
 # SWE-Mutation: Can LLMs Generate Reliable Test Suites in Software Engineering?
 
 <p align="center">
-  <a href="#"><img alt="Paper" src="https://img.shields.io/badge/Paper-ACL%202026%20Findings-b31b1b"></a>
+  <a href="https://aclanthology.org/2026.findings-acl.1976/"><img alt="Paper" src="https://img.shields.io/badge/Paper-ACL%202026%20Findings-b31b1b"></a>
   <a href="#"><img alt="Benchmark" src="https://img.shields.io/badge/Benchmark-SWE--Mutation-blue"></a>
   <a href="#"><img alt="Languages" src="https://img.shields.io/badge/Languages-10-green"></a>
   <a href="#"><img alt="License" src="https://img.shields.io/badge/License-MIT-yellow"></a>
@@ -10,7 +10,7 @@
 
 > **SWE-Mutation: Can LLMs Generate Reliable Test Suites in Software Engineering?**
 > Yuxuan Sun, Yuze Zhao, Yufeng Wang, Yao Du, Zhiyuan Ma, Jinbo Wang, Mengdi Zhang, Kai Zhang, Zhenya Huang\*
-> *Findings of ACL 2026*
+> *Findings of the Association for Computational Linguistics: ACL 2026, pages 39651-39674, July 2026*
 
 This repository hosts the official code and data of **SWE-Mutation**, a repository-level benchmark that evaluates whether LLM-generated **test suites** are reliable and discriminative enough to be used as verification oracles for software engineering tasks. Instead of measuring a test suite against a single golden solution, SWE-Mutation confronts it with **systematically mutated** buggy solutions produced by an **agentic, language-agnostic mutation framework**, and asks: *how many realistic bugs can your tests actually catch?*
 
@@ -21,6 +21,7 @@ This repository hosts the official code and data of **SWE-Mutation**, a reposito
 ## News
 
 - **[2026/07]** Released the curated mutation dataset: [`data/curated_mutations.jsonl`](data/curated_mutations.jsonl).
+- **[2026/07]** Paper published in *Findings of the Association for Computational Linguistics: ACL 2026*, pages 39651-39674.
 - **[2026/04]** Paper released and the initial codebase published.
 
 ---
@@ -252,20 +253,24 @@ bash scripts/run_pipeline.sh --mode rulebased_baseline
 
 ## Citation
 
-If you find SWE-Mutation useful for your research, please cite the arXiv version:
+If you find SWE-Mutation useful for your research, please cite the ACL Anthology version:
 
 ```bibtex
-@misc{sun2026swemutation,
-  title         = {{SWE}-Mutation: Can {LLM}s Generate Reliable Test Suites in Software Engineering?},
-  author        = {Sun, Yuxuan and Zhao, Yuze and Wang, Yufeng and Du, Yao and
-                   Ma, Zhiyuan and Wang, Jinbo and Zhang, Mengdi and
-                   Zhang, Kai and Huang, Zhenya},
-  year          = {2026},
-  eprint        = {2605.22175},
-  archivePrefix = {arXiv},
-  primaryClass  = {cs.SE},
-  url           = {https://arxiv.org/abs/2605.22175},
-  note          = {ACL 2026 Findings}
+@inproceedings{sun-etal-2026-swe,
+  title     = {{SWE}-Mutation: Can {LLM}s Generate Reliable Test Suites in Software Engineering?},
+  author    = {Sun, Yuxuan and Zhao, Yuze and Wang, Yufeng and Du, Yao and
+               Ma, Zhiyuan and Wang, Jinbo and Zhang, Mengdi and
+               Zhang, Kai and Huang, Zhenya},
+  editor    = {Liakata, Maria and Moreira, Viviane P. and Zhang, Jiajun and Jurgens, David},
+  booktitle = {Findings of the Association for Computational Linguistics: ACL 2026},
+  month     = jul,
+  year      = {2026},
+  address   = {San Diego, California, United States},
+  publisher = {Association for Computational Linguistics},
+  pages     = {39651--39674},
+  url       = {https://aclanthology.org/2026.findings-acl.1976/},
+  doi       = {10.18653/v1/2026.findings-acl.1976},
+  isbn      = {979-8-89176-395-1}
 }
 ```
 
