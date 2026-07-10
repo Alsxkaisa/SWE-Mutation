@@ -138,6 +138,7 @@ python inference/inference_opencode_unified.py \
 | `--skill` | `dt-generation` | Skill name; loaded from `~/.opencode/skills/<name>/SKILL.md` |
 | `--run-id` | auto (timestamp) | Run identifier for resume |
 | `--retry-limit` | `2` | Judge retries per strategy round |
+| `--rebuild` | `false` | Force rebuild of Docker images (src + inference) |
 | `--repo-cache` | `./repo-cache` | Git clone cache directory |
 | `--workspace-dir` | `./tmp/workspaces` | Temporary workspace root |
 

@@ -288,6 +288,12 @@ def cleanup_workspace(worktree_path):
 
 def write_issue(worktree_path, issue_text):
     (worktree_path / "ISSUE.md").write_text(issue_text)
+    # Exclude ISSUE.md from git so it doesn't leak into agent-generated patches
+    exclude_file = worktree_path / ".git" / "info" / "exclude"
+    if exclude_file.exists():
+        content = exclude_file.read_text()
+        if "ISSUE.md" not in content:
+            exclude_file.write_text(content + "\nISSUE.md\n")
 
 
 def apply_patches_in_workspace(worktree_path, code_patch, test_patch):
@@ -705,6 +711,15 @@ def _parse_test_output(output: str) -> dict:
 # Patch extraction helpers
 # ---------------------------------------------------------------------------
 
+def _sanitize_patch(patch: str) -> str:
+    # Remove ANSI escape codes, carriage returns, and control characters
+    patch = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', patch)
+    patch = patch.replace('\r\n', '\n').replace('\r', '\n')
+    # Remove trailing whitespace on each line
+    patch = '\n'.join(line.rstrip() for line in patch.splitlines())
+    return patch
+
+
 def _filesystem_diff(worktree_path):
     _run_simple(["git", "add", "-N", "."], cwd=worktree_path, timeout=10, check=False)
     r = _run_simple(["git", "diff"], cwd=worktree_path, timeout=10, check=False)
@@ -744,7 +759,7 @@ def extract_patch(stdout, worktree_path):
         stdout, re.MULTILINE | re.DOTALL,
     )
     if m:
-        patch = m.group(1).strip()
+        patch = _sanitize_patch(m.group(1).strip())
         is_valid, reason = _validate_patch(patch, worktree_path)
         if is_valid:
             return patch
@@ -752,13 +767,13 @@ def extract_patch(stdout, worktree_path):
 
     m = re.search(r"(diff --git .+)", stdout, re.DOTALL)
     if m:
-        patch = m.group(1).strip()
+        patch = _sanitize_patch(m.group(1).strip())
         is_valid, reason = _validate_patch(patch, worktree_path)
         if is_valid:
             return patch
         print(f"  WARNING: raw diff rejected - {reason}")
 
-    patch = _filesystem_diff(worktree_path)
+    patch = _sanitize_patch(_filesystem_diff(worktree_path))
     is_valid, reason = _validate_patch(patch, worktree_path)
     if is_valid:
         return patch
