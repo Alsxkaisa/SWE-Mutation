@@ -469,6 +469,7 @@ if [ -f /home/nonroot/miniconda3/bin/activate ]; then
 fi
 cd /testbed
 git config --global --add safe.directory /testbed || true
+git reset --hard && git clean -fd || true
 if [ -f /tmp/auth.json ]; then
     mkdir -p /home/nonroot/.local/share/opencode
     cp /tmp/auth.json /home/nonroot/.local/share/opencode/auth.json
@@ -723,17 +724,11 @@ def _parse_test_output(output: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _sanitize_patch(patch: str) -> str:
-    # Remove ANSI escape codes, carriage returns, and control characters
+    # Remove ANSI escape codes, normalize line endings only.
+    # Do NOT touch whitespace — let git apply --whitespace=fix handle it.
     patch = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', patch)
     patch = patch.replace('\r\n', '\n').replace('\r', '\n')
-    # Remove trailing whitespace only from added/removed lines (+/-);
-    # preserve context lines (starting with a space) exactly for matching.
-    lines = []
-    for line in patch.splitlines():
-        if line and line[0] in ('+', '-'):
-            line = line.rstrip()
-        lines.append(line)
-    return '\n'.join(lines)
+    return patch
 
 
 def _filesystem_diff(worktree_path, staged=False, intent_to_add=False):
@@ -776,51 +771,89 @@ def extract_allowed_files_from_patch(patch_text: str) -> list[str]:
 
 def _try_fs_diff(worktree_path):
     """Try filesystem diffs in priority order. Returns (patch, source_label) or empty."""
-    # 1. Staged changes (agent runs git add -A as instructed)
     staged = _filesystem_diff(worktree_path, staged=True)
     if staged:
         patch = _sanitize_patch(staged)
-        is_valid, _ = _validate_patch(patch, worktree_path)
-        if is_valid:
+        if _validate_patch(patch, worktree_path)[0]:
             return patch, "staged diff"
-    # 2. Unstaged changes to tracked files
     unstaged = _filesystem_diff(worktree_path)
     if unstaged:
         patch = _sanitize_patch(unstaged)
-        is_valid, _ = _validate_patch(patch, worktree_path)
-        if is_valid:
+        if _validate_patch(patch, worktree_path)[0]:
             return patch, "unstaged diff"
-    # 3. With intent-to-add (catches new untracked files)
     ita = _filesystem_diff(worktree_path, intent_to_add=True)
     if ita:
         patch = _sanitize_patch(ita)
-        is_valid, _ = _validate_patch(patch, worktree_path)
-        if is_valid:
+        if _validate_patch(patch, worktree_path)[0]:
             return patch, "intent-to-add diff"
     return "", ""
 
 
+def _apply_llm_patch_to_workspace(raw_patch, worktree_path):
+    """Try applying LLM-generated patch to workspace, then read back clean diff.
+    
+    This converts potentially corrupted LLM patch into a guaranteed-valid
+    git diff by actually applying it and capturing git's output.
+    Returns clean diff string, or empty string on failure.
+    """
+    patch = _sanitize_patch(raw_patch)
+    is_valid, reason = _validate_patch(patch, worktree_path)
+    if not is_valid:
+        return ""
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False, encoding='utf-8') as f:
+            f.write(patch)
+            patch_file = f.name
+        try:
+            r = _run_simple(
+                ["git", "apply", "--whitespace=fix", "-p1", patch_file],
+                cwd=worktree_path, timeout=30, check=False,
+            )
+            if r.returncode != 0:
+                return ""
+            _run_simple(["git", "add", "-A"], cwd=worktree_path, timeout=10, check=False)
+            r = _run_simple(["git", "diff", "--cached"], cwd=worktree_path, timeout=10, check=False)
+            clean = r.stdout.strip()
+            if clean:
+                return _sanitize_patch(clean)
+        finally:
+            Path(patch_file).unlink(missing_ok=True)
+    except Exception:
+        pass
+    return ""
+
+
 def extract_patch(stdout, worktree_path):
-    # Prefer filesystem diffs — always valid git output, no LLM corruption
-    patch, source = _try_fs_diff(worktree_path)
+    # 1) Prefer filesystem diffs — always valid git output, no LLM corruption
+    patch, _ = _try_fs_diff(worktree_path)
     if patch:
         return patch
 
-    # Fall back to LLM output (agent may have generated patch without applying it)
+    # 2) Try applying LLM's <patch> content to workspace, then read back clean diff
     m = re.search(
         r"^\s*<patch>\s*\n?(.*?)\n?\s*</patch>\s*$",
         stdout, re.MULTILINE | re.DOTALL,
     )
     if m:
-        patch = _sanitize_patch(m.group(1).strip())
+        raw = m.group(1).strip()
+        patch = _apply_llm_patch_to_workspace(raw, worktree_path)
+        if patch:
+            return patch
+        # Apply failed — try raw LLM output as fallback
+        patch = _sanitize_patch(raw)
         is_valid, reason = _validate_patch(patch, worktree_path)
         if is_valid:
             return patch
         print(f"  WARNING: <patch> block rejected - {reason}")
 
+    # 3) Try raw diff --git block (same apply-then-read approach)
     m = re.search(r"(diff --git .+)", stdout, re.DOTALL)
     if m:
-        patch = _sanitize_patch(m.group(1).strip())
+        raw = m.group(1).strip()
+        patch = _apply_llm_patch_to_workspace(raw, worktree_path)
+        if patch:
+            return patch
+        patch = _sanitize_patch(raw)
         is_valid, reason = _validate_patch(patch, worktree_path)
         if is_valid:
             return patch
