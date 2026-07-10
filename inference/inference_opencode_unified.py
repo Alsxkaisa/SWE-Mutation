@@ -914,8 +914,9 @@ def generate_mutants(args):
                 print(f"  FAILED to apply golden patches")
                 failed_ids.append(instance_id)
                 continue
-            _run_simple(["git", "add", "-A", "&&", "git", "commit", "--allow-empty", "-m", "baseline"],
-                        cwd=worktree_path, timeout=30, check=False)
+            _run_simple(["git", "add", "-A"], cwd=worktree_path, timeout=30, check=True)
+            _run_simple(["git", "commit", "--allow-empty", "-m", "baseline"],
+                        cwd=worktree_path, timeout=30, check=True)
 
             # Build src instance image (uses TestSpec.instance_image_key)
             src_image_key = ensure_src_instance_image(instance, force_rebuild=args.rebuild)
