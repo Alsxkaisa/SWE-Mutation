@@ -189,7 +189,7 @@ def _write_and_apply_patch(env: DockerEnvironment, patch_text: str, label: str) 
         return f"{label} patch: empty (skipped)"
     marker = f"SWE_MUTATION_{label.upper()}_PATCH_EOF"
     env.execute(f"cat > /tmp/{label}.patch << '{marker}'\n{patch_text}\n{marker}")
-    result = env.execute(f"git apply -p1 /tmp/{label}.patch 2>&1")
+    result = env.execute(f"git apply --whitespace=fix -p1 /tmp/{label}.patch 2>&1")
     if result.get("returncode", 1) != 0:
         return f"{label} patch apply failed: {(result.get('stdout') or result.get('output', ''))[:300]}"
     return f"{label} patch applied"

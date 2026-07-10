@@ -306,7 +306,7 @@ def apply_patches_in_workspace(worktree_path, code_patch, test_patch):
             f.write(patch_text)
             patch_file = f.name
         try:
-            _run_simple(["git", "apply", "-p1", patch_file], cwd=worktree_path, timeout=30, check=True)
+            _run_simple(["git", "apply", "--whitespace=fix", "-p1", patch_file], cwd=worktree_path, timeout=30, check=True)
             return True
         except subprocess.CalledProcessError as e:
             print(f"  Failed to apply {label} patch: {e.stderr[:200]}")
@@ -559,8 +559,19 @@ def judge_mutant(image_name: str, code_patch: str, test_patch: str, candidate_di
             )
             if r.returncode != 0:
                 err = (r.stderr.strip() or r.stdout.strip())[:500]
-                print(f"    [judge] git apply failed for {label}: {err}")
-            return r.returncode == 0
+                print(f"    [judge] git apply failed (fix) for {label}: {err}")
+                # Retry with --whitespace=nowarn to handle trailing whitespace
+                # on context lines that --whitespace=fix does not address.
+                r = _run_simple(
+                    ["docker", "exec", container, "bash", "-c",
+                     f"git apply --whitespace=nowarn -p1 /tmp/{label}.patch 2>&1"],
+                    timeout=30, check=False,
+                )
+                if r.returncode != 0:
+                    err2 = (r.stderr.strip() or r.stdout.strip())[:500]
+                    print(f"    [judge] git apply failed (nowarn) for {label}: {err2}")
+                    return False
+            return True
         finally:
             Path(host_patch).unlink(missing_ok=True)
 
@@ -715,9 +726,14 @@ def _sanitize_patch(patch: str) -> str:
     # Remove ANSI escape codes, carriage returns, and control characters
     patch = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', patch)
     patch = patch.replace('\r\n', '\n').replace('\r', '\n')
-    # Remove trailing whitespace on each line
-    patch = '\n'.join(line.rstrip() for line in patch.splitlines())
-    return patch
+    # Remove trailing whitespace only from added/removed lines (+/-);
+    # preserve context lines (starting with a space) exactly for matching.
+    lines = []
+    for line in patch.splitlines():
+        if line and line[0] in ('+', '-'):
+            line = line.rstrip()
+        lines.append(line)
+    return '\n'.join(lines)
 
 
 def _filesystem_diff(worktree_path):
