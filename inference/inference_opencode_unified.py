@@ -736,9 +736,14 @@ def _sanitize_patch(patch: str) -> str:
     return '\n'.join(lines)
 
 
-def _filesystem_diff(worktree_path):
-    _run_simple(["git", "add", "-N", "."], cwd=worktree_path, timeout=10, check=False)
-    r = _run_simple(["git", "diff"], cwd=worktree_path, timeout=10, check=False)
+def _filesystem_diff(worktree_path, staged=False, intent_to_add=False):
+    """Run git diff and return stdout. staged=True → --cached."""
+    if intent_to_add:
+        _run_simple(["git", "add", "-N", "."], cwd=worktree_path, timeout=10, check=False)
+    cmd = ["git", "diff"]
+    if staged:
+        cmd.append("--cached")
+    r = _run_simple(cmd, cwd=worktree_path, timeout=10, check=False)
     return r.stdout.strip()
 
 
@@ -769,7 +774,39 @@ def extract_allowed_files_from_patch(patch_text: str) -> list[str]:
     return files
 
 
+def _try_fs_diff(worktree_path):
+    """Try filesystem diffs in priority order. Returns (patch, source_label) or empty."""
+    # 1. Staged changes (agent runs git add -A as instructed)
+    staged = _filesystem_diff(worktree_path, staged=True)
+    if staged:
+        patch = _sanitize_patch(staged)
+        is_valid, _ = _validate_patch(patch, worktree_path)
+        if is_valid:
+            return patch, "staged diff"
+    # 2. Unstaged changes to tracked files
+    unstaged = _filesystem_diff(worktree_path)
+    if unstaged:
+        patch = _sanitize_patch(unstaged)
+        is_valid, _ = _validate_patch(patch, worktree_path)
+        if is_valid:
+            return patch, "unstaged diff"
+    # 3. With intent-to-add (catches new untracked files)
+    ita = _filesystem_diff(worktree_path, intent_to_add=True)
+    if ita:
+        patch = _sanitize_patch(ita)
+        is_valid, _ = _validate_patch(patch, worktree_path)
+        if is_valid:
+            return patch, "intent-to-add diff"
+    return "", ""
+
+
 def extract_patch(stdout, worktree_path):
+    # Prefer filesystem diffs — always valid git output, no LLM corruption
+    patch, source = _try_fs_diff(worktree_path)
+    if patch:
+        return patch
+
+    # Fall back to LLM output (agent may have generated patch without applying it)
     m = re.search(
         r"^\s*<patch>\s*\n?(.*?)\n?\s*</patch>\s*$",
         stdout, re.MULTILINE | re.DOTALL,
@@ -779,7 +816,7 @@ def extract_patch(stdout, worktree_path):
         is_valid, reason = _validate_patch(patch, worktree_path)
         if is_valid:
             return patch
-        print(f"  WARNING: patch rejected - {reason}")
+        print(f"  WARNING: <patch> block rejected - {reason}")
 
     m = re.search(r"(diff --git .+)", stdout, re.DOTALL)
     if m:
@@ -789,10 +826,6 @@ def extract_patch(stdout, worktree_path):
             return patch
         print(f"  WARNING: raw diff rejected - {reason}")
 
-    patch = _sanitize_patch(_filesystem_diff(worktree_path))
-    is_valid, reason = _validate_patch(patch, worktree_path)
-    if is_valid:
-        return patch
     return ""
 
 
