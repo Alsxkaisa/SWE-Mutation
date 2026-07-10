@@ -1,0 +1,47 @@
+CRITICAL ISOLATION RULE:
+You are working in an ISOLATED repository directory at /testbed.
+You MUST ONLY work with files in /testbed and its subdirectories.
+DO NOT access, modify, search, or install files outside this directory.
+Never use /tmp/ or other system directories.
+
+ISSUE:
+{issue}
+
+TEST FILES TO GENERATE:
+{test_files}
+
+GOAL:
+Your objective is to generate a complete test suite from scratch for the repository.
+- Create the test files listed above (they do not exist yet — create them from scratch)
+- Comprehensively cover the functionality described in the issue and related code
+- The repository currently contains the bug described in the issue. It is expected and acceptable that your tests fail against the current (buggy) code — your tests should be correct with respect to the intended behavior, not the current implementation
+- Your generated test code must be syntactically correct and free of compilation errors
+
+WORKFLOW:
+1. Explore the codebase to understand the project structure, existing test conventions, and the relevant modules
+2. Read the source files related to the issue to understand the functionality
+3. Create the test files using the appropriate testing framework for the language:
+   - Python: pytest or unittest (follow project conventions)
+   - Java: JUnit
+   - JavaScript: Jest or Mocha
+   - TypeScript: Jest or Vitest
+   - Go: testing package
+   - Rust: cargo test
+   - PHP: PHPUnit
+4. Cover: normal cases, edge cases, error conditions
+
+CONSTRAINTS:
+- MODIFY ONLY: {test_files} (create these files)
+- DO NOT MODIFY: Any source code files, configuration files, build scripts
+- Do NOT reset, revert, or modify the baseline repository state
+
+FINAL STEP:
+When you are satisfied with your test files, run:
+  git add -A && git diff --cached
+Then wrap the complete diff output with <patch> tags:
+
+<patch>
+<paste the EXACT git diff output here, starting with "diff --git">
+</patch>
+
+Do NOT include anything else after </patch>.

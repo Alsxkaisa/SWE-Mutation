@@ -2,20 +2,26 @@
 """
 SWE-Mutation inference using opencode + skill.
 
-This script adapts the SWE-Mutation agentic mutation framework to use opencode
-as the agent runtime instead of mini-swe-agent. It builds Docker inference
-images with opencode + skill, runs mutation tasks inside containers, verifies
-mutants with the Judge (F2P tests), and saves results compatible with the
-existing evaluation pipeline.
+Modes:
+  generate_mutants  — Agentic mutation: inject bugs using strategy groups
+  generate_tests    — Test generation/repair: write test suites via opencode
+  run_eval          — Evaluate generated test suites against mutants
+  all               — generate_mutants + run_eval
 
-Architecture:
+Architecture (mutants):
   SWE-bench instance image (swebench/sweb.eval.*)
-      ↓ add opencode + uv + skill
+      ↓ add opencode + uv
   inference image (swt-mut.eval.*)
       ↓ apply golden patches → run opencode with mutation prompt
   candidate mutants extracted from <patch> tags
       ↓ verify with Judge (F2P test execution)
   accepted mutants saved to preds.json
+
+Architecture (tests):
+  Same inference image.
+      ↓ checkout base commit (buggy repo) → run opencode with test prompt
+  test patch extracted from <patch> tags
+      ↓ saved to preds.json
 
 Usage:
     # Generate mutants with skill
@@ -23,21 +29,23 @@ Usage:
         --patches-file data/curated_mutations.jsonl \\
         --model deepseek/deepseek-v4-flash --max-instances 5
 
-    # With specific run_id for resume
-    python inference/inference_opencode_unified.py --mode generate_mutants \\
-        --patches-file data/curated_mutations.jsonl \\
-        --model deepseek/deepseek-v4-flash --run-id 20260709
+    # Generate tests (test_generation)
+    python inference/inference_opencode_unified.py --mode generate_tests \\
+        --patches-file data/instances_lite.jsonl \\
+        --task test_generation \\
+        --model deepseek/deepseek-v4-flash --max-instances 5
+
+    # Generate tests (test_repair)
+    python inference/inference_opencode_unified.py --mode generate_tests \\
+        --patches-file data/instances_lite.jsonl \\
+        --task test_repair \\
+        --model deepseek/deepseek-v4-flash --max-instances 5
 
     # Evaluate test suites against mutants
     python inference/inference_opencode_unified.py --mode run_eval \\
-        --patches-file data/patches.jsonl \\
+        --patches-file data/instances_lite.jsonl \\
         --mutants-file results/mutants/preds.json \\
         --test-preds-file results/tests/preds.json
-
-    # Full pipeline: generate mutants then evaluate
-    python inference/inference_opencode_unified.py --mode all \\
-        --patches-file data/patches.jsonl \\
-        --model deepseek/deepseek-v4-flash
 """
 
 import argparse
@@ -72,6 +80,8 @@ PROMPTS_DIR = PROJECT_ROOT / "prompts"
 # SKILLS_DIR is unused; skill is mounted from host ~/.opencode at runtime
 OPCODE_CONFIG_PATH = SCRIPT_DIR / "opencode.json"
 PROMPT_SKILL_PATH = PROMPTS_DIR / "opencode_skill.txt"
+PROMPT_TEST_GENERATION_PATH = PROMPTS_DIR / "test_generation.txt"
+PROMPT_TEST_REPAIR_PATH = PROMPTS_DIR / "test_repair.txt"
 
 REPO_CACHE_DEFAULT = PROJECT_ROOT / "repo-cache"
 WORKSPACE_DIR_DEFAULT = PROJECT_ROOT / "tmp" / "workspaces"
@@ -375,7 +385,13 @@ def _remove_image(image_key: str):
 
 
 def build_inference_image(src_image_key: str, force_rebuild: bool = False) -> str:
-    inference_image_key = src_image_key.replace("sweb.eval", "swt-mut.eval")
+    # Derive inference image name: for SWE-bench images, replace prefix;
+    # for custom images, prefix with "swt-mut.inference."
+    if "sweb.eval" in src_image_key:
+        inference_image_key = src_image_key.replace("sweb.eval", "swt-mut.eval")
+    else:
+        safe_name = src_image_key.replace("/", "_").replace(":", "_")
+        inference_image_key = f"swt-mut.inference.{safe_name}"
 
     client = docker.from_env()
     if force_rebuild:
@@ -1164,6 +1180,193 @@ def run_eval(args):
 
 
 # ---------------------------------------------------------------------------
+# Main logic: generate test suites
+# ---------------------------------------------------------------------------
+
+def generate_tests(args):
+    """Generate test suites using opencode (test_generation or test_repair)."""
+    run_ts = time.strftime("%Y%m%d_%H%M%S")
+    model_safe = args.model.replace("/", "_")
+    run_tag = args.run_id if args.run_id else run_ts
+
+    model_name = f"opencode__{model_safe}"
+    output_path = Path(args.output) if args.output else (
+        PREDICTIONS_DIR / f"{model_name}__{run_tag}" / "preds.json"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    repo_cache_dir = Path(args.repo_cache) if args.repo_cache else REPO_CACHE_DEFAULT
+    repo_cache_dir.mkdir(parents=True, exist_ok=True)
+    workspace_dir = Path(args.workspace_dir) if args.workspace_dir else WORKSPACE_DIR_DEFAULT
+    run_workspace = workspace_dir / run_tag
+    run_workspace.mkdir(parents=True, exist_ok=True)
+
+    completed_ids = get_completed_ids(output_path)
+    is_resume = len(completed_ids) > 0
+
+    # Load instances
+    if args.patches_file:
+        patches_file = Path(args.patches_file)
+        if not patches_file.exists():
+            print(f"Patches file not found: {patches_file}")
+            sys.exit(1)
+        instances = load_patches(patches_file)
+        all_instances = [{"instance_id": iid, **instances[iid]} for iid in instances]
+    else:
+        dataset_name = args.dataset or DEFAULT_DATASET
+        print(f"Loading dataset: {dataset_name}")
+        from datasets import load_dataset as hf_load
+        all_instances = list(hf_load(dataset_name, split="test"))
+
+    for inst in all_instances:
+        if not inst.get("problem_statement") and inst.get("issue"):
+            inst["problem_statement"] = inst["issue"]
+
+    all_ids = [inst["instance_id"] for inst in all_instances]
+    id_to_instance = {inst["instance_id"]: inst for inst in all_instances}
+
+    task = args.task
+    print(f"\nRun ID  : {run_tag}")
+    print(f"Task    : {task}")
+    print(f"Output  : {output_path}")
+
+    if args.instance_ids:
+        instance_ids = [iid for iid in args.instance_ids if iid in id_to_instance and iid not in completed_ids]
+    else:
+        instance_ids = [iid for iid in all_ids if iid not in completed_ids]
+    if args.max_instances:
+        instance_ids = instance_ids[:args.max_instances]
+
+    print(f"Total instances : {len(all_ids)}")
+    print(f"Already done    : {len(completed_ids)}")
+    print(f"To process      : {len(instance_ids)}")
+    if not instance_ids:
+        print("Nothing to do.")
+        return output_path
+
+    # Load the right prompt template
+    if task == "test_generation":
+        prompt_template_path = PROMPT_TEST_GENERATION_PATH
+    else:
+        prompt_template_path = PROMPT_TEST_REPAIR_PATH
+
+    prompt_template = prompt_template_path.read_text(encoding="utf-8") if prompt_template_path.exists() else ""
+    if not prompt_template:
+        print(f"Prompt template not found at {prompt_template_path}")
+        sys.exit(1)
+
+    image_cache = {}
+    success_ids = []
+    failed_ids = []
+
+    for idx, instance_id in enumerate(instance_ids):
+        instance = id_to_instance[instance_id]
+        repo = instance["repo"]
+        base_commit = instance["base_commit"]
+        issue = instance["problem_statement"]
+        version = instance.get("version", "")
+        test_files = instance.get("test_files", [])
+
+        print(f"\n{'=' * 60}")
+        print(f"[{idx + 1}/{len(instance_ids)}] {instance_id}")
+        print(f"  Repo: {repo}  Version: {version}  Commit: {base_commit[:8]}")
+        print(f"  Task: {task}")
+
+        worktree_path = None
+        try:
+            repo_path = ensure_repo(repo, repo_cache_dir)
+            worktree_path = setup_workspace(repo_path, base_commit, instance_id, run_workspace)
+            write_issue(worktree_path, issue)
+
+            # Do NOT apply any patches — start from buggy repo
+            print(f"  Starting from buggy repo (base commit) ...")
+
+            # Build inference image
+            src_image_key = ensure_src_instance_image(instance, force_rebuild=args.rebuild)
+            if src_image_key not in image_cache:
+                try:
+                    image_cache[src_image_key] = build_inference_image(src_image_key, force_rebuild=args.rebuild)
+                except Exception as e:
+                    print(f"  FAILED to build inference image: {e}")
+                    failed_ids.append(instance_id)
+                    continue
+            inference_image = image_cache[src_image_key]
+
+            # Generate prompt
+            prompt = prompt_template.format(
+                issue=issue,
+                test_files=str(test_files),
+            )
+
+            print(f"    Running opencode for {task} ...")
+            t0 = time.time()
+            result, session_export = run_opencode(
+                inference_image, prompt, args.model, args.timeout or DEFAULT_TIMEOUT,
+                instance_id, args.agent,
+                opencode_config=OPCODE_CONFIG_PATH,
+                workspace_mount=str(worktree_path),
+            )
+            elapsed = time.time() - t0
+            print(f"    opencode finished (exit={result.returncode}, elapsed={elapsed:.0f}s)")
+
+            # Save logs
+            instance_log_dir = run_workspace / instance_id / "test_gen"
+            instance_log_dir.mkdir(parents=True, exist_ok=True)
+            (instance_log_dir / "opencode_output.log").write_text(
+                f"=== STDOUT ===\n{result.stdout}\n\n=== STDERR ===\n{result.stderr}",
+                encoding="utf-8",
+            )
+            if session_export and session_export.exists():
+                session_dst = instance_log_dir / "session.json"
+                shutil.move(str(session_export), str(session_dst))
+
+            # Extract patch
+            candidate_diff = extract_patch(result.stdout, worktree_path)
+
+            if not candidate_diff:
+                print(f"    ✗ No valid patch extracted")
+                failed_ids.append(instance_id)
+                continue
+
+            print(f"    ✓ Test patch extracted ({len(candidate_diff)} chars)")
+
+            # Save result
+            existing = {}
+            if output_path.exists():
+                existing = json.loads(output_path.read_text())
+            existing[instance_id] = {
+                "model_name_or_path": model_name,
+                "instance_id": instance_id,
+                "model_patch": candidate_diff,
+            }
+            output_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
+            print(f"    ✓ Saved to {output_path}")
+            success_ids.append(instance_id)
+
+        except subprocess.TimeoutExpired:
+            print(f"  ✗ TIMEOUT")
+            failed_ids.append(instance_id)
+        except Exception:
+            print(f"  ✗ Error: {traceback.format_exc()}")
+            failed_ids.append(instance_id)
+        finally:
+            if worktree_path is not None:
+                cleanup_workspace(worktree_path)
+
+    total_run = len(success_ids) + len(failed_ids)
+    print(f"\n{'=' * 60}")
+    print(f"Test Generation Summary:")
+    print(f"  Total  : {total_run}")
+    print(f"  Success: {len(success_ids)}")
+    print(f"  Failed : {len(failed_ids)}")
+    if failed_ids:
+        print(f"  Failed IDs: {', '.join(failed_ids)}")
+    print(f"Output → {output_path}")
+
+    return output_path
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1172,7 +1375,7 @@ def main():
         description="SWE-Mutation inference using opencode + skill"
     )
     parser.add_argument("--mode", default="generate_mutants",
-                        choices=["generate_mutants", "run_eval", "all"],
+                        choices=["generate_mutants", "generate_tests", "run_eval", "all"],
                         help="Pipeline mode")
     parser.add_argument("--dataset", default=DEFAULT_DATASET,
                         help=f"HuggingFace dataset (default: {DEFAULT_DATASET})")
@@ -1198,6 +1401,7 @@ def main():
                         help="Run identifier for resume")
     parser.add_argument("--skill", default=SKILL_NAME,
                         help=f"Skill name to use (default: {SKILL_NAME})")
+
     parser.add_argument("--rebuild", action="store_true", default=False,
                         help="Force rebuild Docker images even if they exist")
     parser.add_argument("--retry-limit", type=int, default=2,
@@ -1224,6 +1428,9 @@ def main():
         preds_path = generate_mutants(args)
         if args.mode == "all":
             args.mutants_file = str(preds_path)
+
+    if args.mode == "generate_tests":
+        generate_tests(args)
 
     if args.mode in ("run_eval", "all"):
         if not args.mutants_file or not args.test_preds_file:

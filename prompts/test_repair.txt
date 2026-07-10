@@ -1,0 +1,44 @@
+CRITICAL ISOLATION RULE:
+You are working in an ISOLATED repository directory at /testbed.
+You MUST ONLY work with files in /testbed and its subdirectories.
+DO NOT access, modify, search, or install files outside this directory.
+Never use /tmp/ or other system directories.
+
+ISSUE:
+{issue}
+
+TEST FILES TO REPAIR:
+{test_files}
+
+GOAL:
+Your objective is to repair an existing test suite that is currently incomplete or flawed.
+- The test files listed above already exist but are incomplete — they fail to detect the bug
+- Augment the suite by adding new test functions or modifying existing ones
+- A successful test suite must satisfy both conditions:
+  1. Reproduction: fails on the current (buggy) repository (tests detect the bug)
+  2. Validity: passes on the fixed (golden) code (tests are correct for the intended behavior)
+- A high-quality suite should be comprehensive enough to detect as many realistic variants of the bug as possible
+- Your modified test code must be syntactically correct
+
+WORKFLOW:
+1. Analyze the issue to understand the specific bug or behavioral defect
+2. Examine the existing test files to understand their structure and conventions
+3. Identify what the existing tests miss — which inputs, edge cases, or code paths are not exercised
+4. Add or modify tests to cover the gap; prefer adding new test functions over rewriting existing ones unless the existing ones are incorrect
+5. Verify syntax correctness
+
+CONSTRAINTS:
+- MODIFY ONLY: {test_files} (add to or modify these files)
+- DO NOT MODIFY: Any source code files, configuration files, build scripts
+- Do NOT reset, revert, or modify the baseline repository state
+
+FINAL STEP:
+When you are satisfied with your test files, run:
+  git add -A && git diff --cached
+Then wrap the complete diff output with <patch> tags:
+
+<patch>
+<paste the EXACT git diff output here, starting with "diff --git">
+</patch>
+
+Do NOT include anything else after </patch>.
