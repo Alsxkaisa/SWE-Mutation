@@ -1191,7 +1191,7 @@ def generate_tests(args):
 
     model_name = f"opencode__{model_safe}"
     output_path = Path(args.output) if args.output else (
-        PREDICTIONS_DIR / f"{model_name}__{run_tag}" / "preds.json"
+        Path("results") / "tests" / "preds.json"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1379,8 +1379,8 @@ def main():
                         help="Pipeline mode")
     parser.add_argument("--dataset", default=DEFAULT_DATASET,
                         help=f"HuggingFace dataset (default: {DEFAULT_DATASET})")
-    parser.add_argument("--patches-file", default=None,
-                        help="JSONL file with instance patch data (overrides --dataset)")
+    parser.add_argument("--patches-file", default="data/swe_mutation/instances.jsonl",
+                        help="JSONL file with instance patch data (default: data/swe_mutation/instances.jsonl)")
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help="Model name for opencode")
     parser.add_argument("--max-instances", type=int, default=None,
